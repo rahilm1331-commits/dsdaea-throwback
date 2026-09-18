@@ -45,3 +45,5 @@ alter table public.answers enable row level security;
 
 -- No anon/authenticated policies are intentionally created.
 -- Keep SUPABASE_SECRET_KEY server-only in Vercel.
+
+-- Run supabase/performance.sql once after this schema to add the fast answer RPC.

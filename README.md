@@ -51,7 +51,7 @@ Redeploy after adding variables.
 - Host creates a room and receives a 4-character code.
 - Players open `/join`, enter the code and their name.
 - Host starts the game.
-- Each question has a 15-second timer.
+- Each question has a 30-second timer.
 - Player chooses a year from 1800–2026.
 - Score = max(0, 100 - 4 × absolute year difference).
 - Leaderboard updates every second.

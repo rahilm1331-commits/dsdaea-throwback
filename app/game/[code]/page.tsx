@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Leaderboard, { Player } from "@/components/Leaderboard";
+import { EVENTS } from "@/lib/events";
+import { GAME_DURATION_SECONDS } from "@/lib/game";
 
 type Game = {
   id: string;
@@ -25,6 +27,12 @@ type Reveal = {
   points: number;
 };
 
+const YEARS = [1800, 1900, 1950, 2000, 2026];
+
+function yearPosition(year: number) {
+  return ((year - 1800) / (2026 - 1800)) * 100;
+}
+
 export default function GamePage() {
   const params = useParams<{ code: string }>();
   const code = params.code;
@@ -35,12 +43,17 @@ export default function GamePage() {
   const [event, setEvent] = useState<Event | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [guess, setGuess] = useState(1900);
-  const [seconds, setSeconds] = useState(15);
+  const [seconds, setSeconds] = useState(GAME_DURATION_SECONDS);
   const [locked, setLocked] = useState(false);
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
+  const [imageReady, setImageReady] = useState(false);
+  const [imagesReady, setImagesReady] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const lastRound = useRef(-1);
+
+  const imageUrls = useMemo(() => EVENTS.map((item) => item.image), []);
 
   async function refresh() {
     try {
@@ -56,6 +69,8 @@ export default function GamePage() {
         setLocked(false);
         setReveal(null);
         setGuess(1900);
+        setSeconds(GAME_DURATION_SECONDS);
+        setImageReady(false);
       }
     } catch (error: any) {
       setErr(error?.message || "Unable to load game.");
@@ -89,6 +104,23 @@ export default function GamePage() {
       return;
     }
 
+    // Preload every Throwback image immediately. Because all 10 images are local
+    // static assets, the browser can cache them before later rounds begin.
+    let cancelled = false;
+    Promise.all(
+      imageUrls.map(
+        (src) =>
+          new Promise<void>((resolve) => {
+            const image = new window.Image();
+            image.onload = () => resolve();
+            image.onerror = () => resolve();
+            image.src = src;
+          }),
+      ),
+    ).then(() => {
+      if (!cancelled) setImagesReady(true);
+    });
+
     void refresh();
     void loadPlayers();
 
@@ -97,28 +129,33 @@ export default function GamePage() {
       void loadPlayers();
     }, 1000);
 
-    return () => window.clearInterval(interval);
-  }, [code, router]);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [code, router, imageUrls]);
 
   useEffect(() => {
-    if (!game || game.status !== "question" || !game.question_started_at) return;
+    if (!game || game.status !== "question" || !game.question_started_at || !imageReady) return;
 
     const updateTimer = () => {
       const elapsed = Math.floor(
         (Date.now() - new Date(game.question_started_at as string).getTime()) / 1000,
       );
-      setSeconds(Math.max(0, 15 - elapsed));
+      setSeconds(Math.max(0, GAME_DURATION_SECONDS - elapsed));
     };
 
     updateTimer();
     const timer = window.setInterval(updateTimer, 250);
     return () => window.clearInterval(timer);
-  }, [game]);
+  }, [game, imageReady]);
 
   async function submit() {
-    if (!player || locked || seconds === 0) return;
+    if (!player || locked || seconds === 0 || submitting) return;
 
     setErr("");
+    setSubmitting(true);
+    setLocked(true);
 
     try {
       const response = await fetch(`/api/game/${code}/answer`, {
@@ -133,12 +170,18 @@ export default function GamePage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not submit answer.");
 
-      setLocked(true);
       setReveal(data);
       void loadPlayers();
     } catch (error: any) {
+      setLocked(false);
       setErr(error?.message || "Could not submit answer.");
+    } finally {
+      setSubmitting(false);
     }
+  }
+
+  function handleImageLoad() {
+    setImageReady(true);
   }
 
   if (loading) {
@@ -190,16 +233,33 @@ export default function GamePage() {
                 <h1 className="tb-title">You&apos;re in!</h1>
                 <div className="tb-code">{code}</div>
                 <p className="tb-sub">Waiting for the host to start the game.</p>
+                {!imagesReady && <p className="tb-note">Preparing the 10 historical images…</p>}
+                {imagesReady && <p className="tb-note">Images ready. You&apos;re good to go!</p>}
                 <Leaderboard players={players} me={player?.id} />
               </div>
             ) : event && game ? (
               <>
-                <img src={event.image} alt={event.description} />
+                <div className="tb-image-frame">
+                  {!imageReady && (
+                    <div className="tb-image-loading" aria-live="polite">
+                      <div className="tb-spinner" />
+                      <span>Loading image…</span>
+                    </div>
+                  )}
+                  <img
+                    src={event.image}
+                    alt={event.description}
+                    className={imageReady ? "tb-event-image ready" : "tb-event-image"}
+                    onLoad={handleImageLoad}
+                  />
+                </div>
 
                 <div className="tb-qbody">
                   <div className="tb-round">
                     <span>ROUND {game.current_round + 1} / 10</span>
-                    <span className="tb-timer">{seconds}s</span>
+                    <span className="tb-timer">
+                      {imageReady ? `${seconds}s` : "READYING"}
+                    </span>
                   </div>
 
                   {reveal ? (
@@ -212,37 +272,47 @@ export default function GamePage() {
                         {reveal.difference === 1 ? "" : "s"} away
                       </div>
                     </div>
+                  ) : !imageReady ? (
+                    <div className="tb-image-wait">
+                      <div className="tb-year">—</div>
+                      <p className="tb-hint">Your answer timer will start when the image is ready.</p>
+                    </div>
                   ) : (
                     <>
                       <div className="tb-year">{guess}</div>
                       <p className="tb-hint">Place the year on the timeline.</p>
 
-                      <input
-                        className="tb-slider"
-                        type="range"
-                        min="1800"
-                        max="2026"
-                        value={guess}
-                        disabled={locked || seconds === 0}
-                        onChange={(e) => setGuess(Number(e.target.value))}
-                        aria-label="Guess the year"
-                      />
-
-                      <div className="tb-scale">
-                        <span>1800</span>
-                        <span>1900</span>
-                        <span>1950</span>
-                        <span>2000</span>
-                        <span>2026</span>
+                      <div className="tb-slider-wrap">
+                        <input
+                          className="tb-slider"
+                          type="range"
+                          min="1800"
+                          max="2026"
+                          value={guess}
+                          disabled={locked || seconds === 0}
+                          onChange={(e) => setGuess(Number(e.target.value))}
+                          aria-label="Guess the year"
+                        />
+                        <div className="tb-scale" aria-hidden="true">
+                          {YEARS.map((yearMark) => (
+                            <span key={yearMark} style={{ left: `${yearPosition(yearMark)}%` }}>
+                              {yearMark}
+                            </span>
+                          ))}
+                        </div>
                       </div>
 
                       {locked || seconds === 0 ? (
                         <div className="tb-locked">
-                          {seconds === 0 ? "TIME'S UP" : "ANSWER LOCKED"}
+                          {seconds === 0 ? "TIME'S UP" : submitting ? "ANSWER RECEIVED · CALCULATING…" : "ANSWER LOCKED"}
                         </div>
                       ) : (
-                        <button className="tb-btn primary tb-submit" onClick={submit}>
-                          LOCK IN {guess}
+                        <button
+                          className="tb-btn primary tb-submit"
+                          onClick={submit}
+                          disabled={submitting}
+                        >
+                          {submitting ? "LOCKING IN…" : `LOCK IN ${guess}`}
                         </button>
                       )}
 
