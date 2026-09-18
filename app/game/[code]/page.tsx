@@ -1,0 +1,24 @@
+ "use client";
+import {useEffect,useRef,useState} from "react";
+import {useParams,useRouter} from "next/navigation";
+import Leaderboard,{Player} from "@/components/Leaderboard";
+
+type Game={id:string;code:string;status:string;current_round:number;question_started_at:string};
+type Event={id:number;image:string;description:string};
+export default function GamePage(){
+ const {code}=useParams<{code:string}>(); const router=useRouter(); const [player,setPlayer]=useState<any>(null); const [game,setGame]=useState<Game|null>(null); const [event,setEvent]=useState<Event|null>(null); const [players,setPlayers]=useState<Player[]>([]); const [guess,setGuess]=useState(1900); const [seconds,setSeconds]=useState(15); const [locked,setLocked]=useState(false); const [reveal,setReveal]=useState<any>(null); const [err,setErr]=useState(""); const [loading,setLoading]=useState(true); const lastRound=useRef(-1);
+ async function refresh(){try{const r=await fetch(`/api/game/${code}`,{cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error);setGame(d.game);setEvent(d.event);if(d.game.current_round!==lastRound.current){lastRound.current=d.game.current_round;setLocked(false);setReveal(null);setGuess(1900)}}catch(e:any){setErr(e.message)}finally{setLoading(false)}}
+ useEffect(()=>{const raw=sessionStorage.getItem("throwback_player");if(!raw){router.replace("/join");return}setPlayer(JSON.parse(raw));refresh();loadPlayers();const iv=setInterval(()=>{refresh();loadPlayers()},1000);return()=>clearInterval(iv)},[code]);
+ async function loadPlayers(){try{const r=await fetch(`/api/game/${code}/players`,{cache:"no-store"});const d=await r.json();if(r.ok)setPlayers(d.players||[])}catch{}}
+ useEffect(()=>{if(!game||game.status!=="question")return;const t=setInterval(()=>{const left=Math.max(0,15-Math.floor((Date.now()-new Date(game.question_started_at).getTime())/1000));setSeconds(left)},250);return()=>clearInterval(t)},[game]);
+ async function submit(){setErr("");try{const r=await fetch(`/api/game/${code}/answer`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({playerToken:player.player_token,guess})});const d=await r.json();if(!r.ok)throw new Error(d.error);setLocked(true);setReveal(d);loadPlayers()}catch(e:any){setErr(e.message)}}
+ if(loading)return <main className="tb-shell"><div className="tb-wrap"><div className="tb-card tb-center">Loading game…</div></div></main>;
+ if(err&&!game)return <main className="tb-shell"><div className="tb-wrap"><div className="tb-card tb-center">{err}</div></div></main>;
+ const finished=game?.status==="finished";
+ return <main className="tb-shell"><div className="tb-wrap"><div className="tb-brand"><a className="tb-logo" href="/">THROW<span>BACK</span></a><div className="tb-pill">GAME {code}</div></div>
+ <div className="tb-game-grid"><section className="tb-card tb-question">
+ {finished?<div className="tb-reveal"><div className="tb-finished">GAME OVER</div><p className="tb-sub">Final leaderboard</p><Leaderboard players={players} me={player?.id}/><a className="tb-btn primary" href="/">RETURN HOME</a></div>:
+ game?.status==="lobby"?<div className="tb-reveal"><h1 className="tb-title">You're in!</h1><div className="tb-code">{code}</div><p className="tb-sub">Waiting for the host to start the game.</p><Leaderboard players={players} me={player?.id}/></div>:
+ event&&<><img src={event.image} alt={event.description}/><div className="tb-qbody"><div className="tb-round"><span>ROUND {(game.current_round||0)+1} / 10</span><span className="tb-timer">{seconds}s</span></div>{reveal?<div className="tb-reveal"><div className="tb-sub">CORRECT YEAR</div><div className="tb-correct">{reveal.correctYear}</div><div className="tb-points">+{reveal.points} POINTS</div><div className="tb-diff">You guessed {reveal.guess} · {reveal.difference} year{reveal.difference===1?"":"s"} away</div></div>:<><div className="tb-year">{guess}</div><p className="tb-hint">Place the year on the timeline.</p><input className="tb-slider" type="range" min="1800" max="2026" value={guess} disabled={locked||seconds===0} onChange={e=>setGuess(Number(e.target.value))}/><div className="tb-scale"><span>1800</span><span>1900</span><span>1950</span><span>2000</span><span>2026</span></div>{locked||seconds===0?<div className="tb-locked">{seconds===0?"TIME'S UP":"ANSWER LOCKED"}</div>:<button className="tb-btn primary tb-submit" onClick={submit}>LOCK IN {guess}</button>}{err&&<div style={{color:"var(--danger)",marginTop:12}}>{err}</div>}</>}</div></>)}
+ </section><aside className="tb-card tb-side"><Leaderboard players={players} me={player?.id}/></aside></div></div></main>;
+}
