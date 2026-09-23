@@ -3,11 +3,20 @@ import { supabaseAdmin } from "@/lib/supabase-server";
 import { makeCode, makeToken } from "@/lib/game";
 
 export async function POST() {
-  const db=supabaseAdmin();
-  for(let i=0;i<10;i++){
-    const code=makeCode(4), token=makeToken(40);
-    const {data,error}=await db.from("games").insert({code,host_token:token,status:"lobby",current_round:0}).select("id,code").single();
-    if(!error&&data) return NextResponse.json({code,hostToken:token});
+  const db = supabaseAdmin();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = makeCode();
+    const hostToken = makeToken(40);
+    const { data, error } = await db.from("games").insert({
+      code,
+      host_token: hostToken,
+      status: "lobby",
+      current_round: 0,
+      stage: "throwback",
+      stage_status: "not_started",
+      question_started_at: null,
+    }).select("id,code,host_token").single();
+    if (!error && data) return NextResponse.json({ code: data.code, hostToken: data.host_token });
   }
-  return NextResponse.json({error:"Could not create a unique room. Try again."},{status:500});
+  return NextResponse.json({ error: "Could not create a game. Please try again." }, { status: 500 });
 }

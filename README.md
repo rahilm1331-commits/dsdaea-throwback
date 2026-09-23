@@ -1,27 +1,28 @@
-# THROWBACK
+# AEROQUEST
 
-A live multiplayer aviation & space history year-guessing game built with Next.js and Supabase.
+A live multiplayer aviation challenge with one room, three rounds, and one cumulative leaderboard.
 
-## 1. Create Supabase project
+## Rounds
 
-Create a project at https://supabase.com/.
+1. **THROWBACK** — 10 aviation/space-history year-slider questions.
+2. **ASCENSION** — 10 fixed-wing flight-science multiple-choice questions.
+3. **IGNITION** — 10 aircraft/rocket-propulsion multiple-choice questions.
 
-Open **SQL Editor**, paste the contents of `supabase/schema.sql`, and run it.
+Each question runs for 30 seconds. The host screen is intended for a projector. Correct answers are hidden until the 30-second timer expires; the host then advances to the next question.
 
-Then go to Project Settings → API and copy:
-- Project URL
-- anon/public key
-- service_role key
+## Player reconnects
 
-## 2. Run locally
+Players enter a participant ID / roll number. That ID is unique within the room. If a player disconnects, they can return to `/join`, enter the same room code and participant ID, and their existing score is restored.
 
-Install Node.js LTS.
+## Supabase
 
-```bash
-npm install
-```
+### Existing V1/V2 database
+Run **`supabase/migration-v3.sql` once** in the Supabase SQL Editor. Do not run the old schema again. The migration adds the three-round fields, participant IDs, quiz answer support, and both answer functions.
 
-Create `.env.local`:
+### New database
+You may run `supabase/schema.sql` first and then `supabase/migration-v3.sql`.
+
+## Environment variables
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=YOUR_PROJECT_URL
@@ -29,52 +30,29 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
 SUPABASE_SECRET_KEY=YOUR_SECRET_KEY
 ```
 
-Then:
+Never commit `.env.local` or the Supabase secret key.
 
-```bash
-npm run dev
-```
+## Deploy
 
-Open http://localhost:3000.
+Push the repository to GitHub and connect it to Vercel. Set the three environment variables in Vercel.
 
-## 3. Deploy to Vercel
+## Capacity notes
 
-Push this folder to GitHub, then import the repository into Vercel.
+The app is designed for an event-sized room and uses one combined game-state/leaderboard request per client rather than separate game and leaderboard polling. Player clients poll every 2.5 seconds; the host polls every 1.5 seconds. The intended target is at least 175 simultaneous players, but an actual pre-event load test is recommended because final capacity depends on the Supabase project plan and network conditions.
 
-In Vercel → Project → Settings → Environment Variables, add all three variables from `.env.local`.
+## Scoring
 
-Redeploy after adding variables.
+Throwback: `max(0, 100 - 4 × year difference)`.
 
-## 4. Game flow
+Ascension/Ignition: correct answers receive 50–100 points depending on how much of the 30-second window remained; incorrect answers receive 0. This can be changed when the final question/scoring rules are supplied.
 
-- Host opens `/host`.
-- Host creates a room and receives a 4-character code.
-- Players open `/join`, enter the code and their name.
-- Host starts the game.
-- Each question has a 30-second timer.
-- Player chooses a year from 1800–2026.
-- Score = max(0, 100 - 4 × absolute year difference).
-- Leaderboard updates every second.
-- Host advances the game after each round.
 
-## Important security note
+## Performance notes for the 175-player event
 
-`SUPABASE_SECRET_KEY` must NEVER be exposed in client-side code or committed to GitHub. Vercel environment variables keep it server-side.
+- Player game-state polling runs every 2.5 seconds.
+- Player leaderboard polling runs every 5 seconds and is served with a short CDN cache to prevent all players from repeatedly hitting Postgres for the same leaderboard.
+- Host polling runs every 2 seconds and is authorized with the host token; only the host receives the full player list from the game-state endpoint.
+- A composite index on `(game_id, total_score desc, joined_at asc)` is included in `migration-v3.sql` for leaderboard queries.
+- Images are static WebP assets served by Vercel, not Supabase.
 
-The correct years are stored in `lib/events.ts` and are only returned to the host/reveal response, not the normal player game-state response.
-
-## Images
-
-The supplied ten images are already in `public/images/` and are referenced in `lib/events.ts`.
-
-The cards are in the order you uploaded:
-1. Lilienthal — 1893
-2. Wright Flyer — 1903
-3. Spirit of St. Louis — 1927
-4. Bell X-1 — 1947
-5. de Havilland Comet — 1952
-6. Concorde — 1969
-7. Apollo 11 — 1969
-8. Mangalyaan — 2013
-9. Falcon 9 landing — 2015
-10. Aryabhata — 1975
+For an existing V1/V2 Supabase project, run `supabase/migration-v3.sql` once before using this version. Do not rerun the old schema migration.
