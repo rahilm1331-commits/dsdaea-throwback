@@ -1,4 +1,5 @@
 export const GAME_DURATION_SECONDS = 30;
+export const QUESTION_START_BUFFER_SECONDS = 5;
 export const MAX_PLAYERS = 250;
 
 export function makeCode(length = 4) {

@@ -62,7 +62,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ code: st
         .select("points,guessed_year,answer_text,round")
         .eq("player_id", player.id).eq("round", game.current_round).maybeSingle();
       if (answer) myAnswer = {
-        points: answer.points,
+        points: expired ? answer.points : 0,
         guessedYear: answer.guessed_year,
         selectedOption: answer.answer_text == null ? null : Number(answer.answer_text),
       };

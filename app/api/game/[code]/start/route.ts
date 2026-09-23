@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-server";
+import { QUESTION_START_BUFFER_SECONDS } from "@/lib/game";
 
 export async function POST(req: Request, { params }: { params: Promise<{ code: string }> }) {
   const { code: rawCode } = await params;
@@ -12,7 +13,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
   if (game.status === "finished") return NextResponse.json({ error: "Game is finished." }, { status: 409 });
   if (game.stage_status === "question") return NextResponse.json({ error: "This round is already running." }, { status: 409 });
 
-  const now = new Date().toISOString();
+  const now = new Date(Date.now() + QUESTION_START_BUFFER_SECONDS * 1000).toISOString();
   const { error: updateError } = await db.from("games").update({
     status: "question",
     stage_status: "question",

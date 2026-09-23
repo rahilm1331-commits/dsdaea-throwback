@@ -42,17 +42,32 @@ export default function GamePage() {
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState("");
   const lastRound = useRef(-1);
+  const lastRevealRound = useRef(-1);
+  const clockOffsetMs = useRef(0);
   const imageUrls = useMemo(() => EVENTS.map(e => e.image), []);
+  const preloadedImages = useRef<Set<string>>(new Set());
 
   async function refresh() {
     try {
+      const requestStarted = Date.now();
       const response = await fetch(`/api/game/${code}`, { cache: "no-store", headers: player?.player_token ? { "x-player-token": player.player_token } : {} });
       const data = await response.json();
+      const requestFinished = Date.now();
       if (!response.ok) throw new Error(data.error || "Unable to load game.");
+      if (data.serverNow) {
+        const serverMs = new Date(data.serverNow).getTime();
+        clockOffsetMs.current = serverMs - ((requestStarted + requestFinished) / 2);
+      }
       setGame(data.game); setContent(data.content); setReveal(data.reveal); setMyAnswer(data.myAnswer);
       if (data.game.current_round !== lastRound.current) {
         lastRound.current = data.game.current_round;
         setGuess(1900); setSelected(null); setSubmitting(false); setImageReady(false); setSeconds(GAME_DURATION_SECONDS);
+        lastRevealRound.current = -1;
+        if (data.content?.type === "throwback" && preloadedImages.current.has(data.content.image)) setImageReady(true);
+        void refreshLeaderboard();
+      }
+      if (data.reveal && data.game.current_round !== lastRevealRound.current) {
+        lastRevealRound.current = data.game.current_round;
         void refreshLeaderboard();
       }
     } catch (error: any) { setErr(error?.message || "Unable to load game."); }
@@ -73,34 +88,38 @@ export default function GamePage() {
     if (!raw) { router.replace("/join"); return; }
     try { setPlayer(JSON.parse(raw)); } catch { sessionStorage.removeItem("throwback_player"); router.replace("/join"); return; }
     let cancelled = false;
-    Promise.all(imageUrls.map(src => new Promise<void>(resolve => { const image = new window.Image(); image.onload = () => resolve(); image.onerror = () => resolve(); image.src = src; }))).then(() => { if (!cancelled) setImagesReady(true); });
+    Promise.all(imageUrls.map(src => new Promise<void>(resolve => { const image = new window.Image(); image.onload = () => { preloadedImages.current.add(src); resolve(); }; image.onerror = () => resolve(); image.src = src; }))).then(() => { if (!cancelled) setImagesReady(true); });
     return () => { cancelled = true; };
   }, [code, router, imageUrls]);
 
   useEffect(() => { if (player) { void refresh(); void refreshLeaderboard(); } }, [player]);
   useEffect(() => {
     if (!player) return;
-    const iv = window.setInterval(() => void refresh(), 2500);
+    const iv = window.setInterval(() => void refresh(), 1000);
     const lb = window.setInterval(() => void refreshLeaderboard(), 5000);
     return () => { window.clearInterval(iv); window.clearInterval(lb); };
   }, [player, code]);
 
   useEffect(() => {
     if (!game || game.status !== "question" || !game.question_started_at) return;
-    const duration = game.stage === "throwback" ? 30 : 30;
-    const update = () => setSeconds(Math.max(0, duration - Math.floor((Date.now() - new Date(game.question_started_at as string).getTime()) / 1000)));
-    update(); const timer = window.setInterval(update, 250); return () => window.clearInterval(timer);
+    const duration = GAME_DURATION_SECONDS;
+    const update = () => {
+      const now = Date.now() + clockOffsetMs.current;
+      const start = new Date(game.question_started_at as string).getTime();
+      const elapsed = (now - start) / 1000;
+      setSeconds(elapsed < 0 ? duration : Math.max(0, duration - Math.floor(elapsed)));
+    };
+    update(); const timer = window.setInterval(update, 100); return () => window.clearInterval(timer);
   }, [game?.status, game?.question_started_at, game?.current_round, game?.stage]);
 
   async function submitAnswer(answer: number) {
-    if (!player || submitting || myAnswer || seconds === 0 || game?.status !== "question") return;
+    if (!player || submitting || myAnswer || seconds === 0 || preStart || game?.status !== "question") return;
     setErr(""); setSubmitting(true); setSelected(answer);
     try {
       const response = await fetch(`/api/game/${code}/answer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ playerToken: player.player_token, answer }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not submit answer.");
       setMyAnswer({ points: data.points, guessedYear: game.stage === "throwback" ? answer : null, selectedOption: game.stage === "throwback" ? null : answer });
-      void refreshLeaderboard();
     } catch (error: any) { setSelected(null); setErr(error?.message || "Could not submit answer."); }
     finally { setSubmitting(false); }
   }
@@ -114,6 +133,8 @@ export default function GamePage() {
   const isQuestion = game?.status === "question" && game.stage_status === "question";
   const isLobby = game?.status === "lobby" || game?.stage_status === "not_started";
   const expired = seconds === 0;
+  const questionStartMs = game?.question_started_at ? new Date(game.question_started_at).getTime() : 0;
+  const preStart = Boolean(questionStartMs && (Date.now() + clockOffsetMs.current) < questionStartMs);
   const showReveal = Boolean(reveal);
   const answered = Boolean(myAnswer);
 
@@ -126,15 +147,15 @@ export default function GamePage() {
             {content.type === "throwback" ? <>
               <div className="tb-image-frame">{!imageReady && <div className="tb-image-loading"><div className="tb-spinner"/><span>Loading image…</span></div>}<img src={content.image} alt={content.description} className={imageReady ? "tb-event-image ready" : "tb-event-image"} onLoad={() => setImageReady(true)} /></div>
               <div className="tb-qbody">
-                <div className="tb-round"><span>THROWBACK · {currentRound + 1} / 10</span><span className="tb-timer">{imageReady ? `${seconds}s` : "READYING"}</span></div>
-                {showReveal ? <RevealBlock reveal={reveal!} myAnswer={myAnswer} /> : answered || expired ? <div className="tb-locked">{expired ? "TIME'S UP · WAITING FOR REVEAL" : "ANSWER LOCKED"}</div> : <><div className="tb-year">{guess}</div><p className="tb-hint">Place the year on the timeline.</p><div className="tb-slider-wrap"><input className="tb-slider" type="range" min="1800" max="2026" value={guess} disabled={!isQuestion || submitting} onChange={e => setGuess(Number(e.target.value))}/><div className="tb-scale">{YEARS.map(y => <span key={y} style={{left:`${yearPosition(y)}%`}}>{y}</span>)}</div></div><button className="tb-btn primary tb-submit" disabled={submitting || !isQuestion || seconds === 0} onClick={() => submitAnswer(guess)}>{submitting ? "LOCKING IN…" : `LOCK IN ${guess}`}</button></>}
+                <div className="tb-round"><span>THROWBACK · {currentRound + 1} / 10</span><span className="tb-timer">{!imageReady ? "READYING" : preStart ? "GET READY" : `${seconds}s`}</span></div>
+                {showReveal ? <RevealBlock reveal={reveal!} myAnswer={myAnswer} /> : answered || expired ? <div className="tb-locked">{expired ? "TIME'S UP · WAITING FOR REVEAL" : "ANSWER LOCKED"}</div> : <><div className="tb-year">{guess}</div><p className="tb-hint">Place the year on the timeline.</p><div className="tb-slider-wrap"><input className="tb-slider" type="range" min="1800" max="2026" value={guess} disabled={!isQuestion || submitting || preStart} onChange={e => setGuess(Number(e.target.value))}/><div className="tb-scale">{YEARS.map(y => <span key={y} style={{left:`${yearPosition(y)}%`}}>{y}</span>)}</div></div><button className="tb-btn primary tb-submit" disabled={submitting || !isQuestion || seconds === 0 || preStart} onClick={() => submitAnswer(guess)}>{submitting ? "LOCKING IN…" : `LOCK IN ${guess}`}</button></>}
                 {err && <div className="tb-error">{err}</div>}
               </div>
             </> : <div className="quiz-body">
-              <div className="tb-round"><span>{def.name} · {currentRound % 10 + 1} / 10</span><span className="tb-timer">{seconds}s</span></div>
+              <div className="tb-round"><span>{def.name} · {currentRound % 10 + 1} / 10</span><span className="tb-timer">{preStart ? "GET READY" : `${seconds}s`}</span></div>
               <div className="quiz-question-number">QUESTION {currentRound % 10 + 1}</div>
               <h1 className="quiz-question">{content.question}</h1>
-              <div className="quiz-options">{content.options.map((option, index) => <button key={option} className={`quiz-option ${selected === index ? "selected" : ""} ${answered ? "answered" : ""}`} disabled={!isQuestion || answered || submitting || seconds === 0} onClick={() => submitAnswer(index)}><span>{String.fromCharCode(65 + index)}</span>{option}</button>)}</div>
+              <div className="quiz-options">{content.options.map((option, index) => <button key={option} className={`quiz-option ${selected === index ? "selected" : ""} ${answered ? "answered" : ""}`} disabled={!isQuestion || answered || submitting || seconds === 0 || preStart} onClick={() => submitAnswer(index)}><span>{String.fromCharCode(65 + index)}</span>{option}</button>)}</div>
               {showReveal ? <RevealBlock reveal={reveal!} myAnswer={myAnswer} selected={selected}/>: answered || expired ? <div className="tb-locked">{expired ? "TIME'S UP · ANSWER REVEALING…" : "ANSWER LOCKED · WAIT FOR REVEAL"}</div> : <p className="tb-note quiz-hint">Choose one answer. Faster correct answers score more points.</p>}
               {err && <div className="tb-error">{err}</div>}
             </div>}

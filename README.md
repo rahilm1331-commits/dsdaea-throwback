@@ -56,3 +56,18 @@ Ascension/Ignition: correct answers receive 50–100 points depending on how muc
 - Images are static WebP assets served by Vercel, not Supabase.
 
 For an existing V1/V2 Supabase project, run `supabase/migration-v3.sql` once before using this version. Do not rerun the old schema migration.
+
+## V3.1 patch
+
+This version includes the V3.1 synchronization and scoring patch.
+
+For an existing V3 Supabase project, run `supabase/migration-v3-1.sql` once after `migration-v3.sql`.
+
+V3.1 changes:
+- 5-second server-side question-start buffer so clients can receive the next question before the 30-second timer begins.
+- Player/host game-state polling increased to 1 second for faster round transitions.
+- Client timer uses server-clock offset estimation.
+- Throwback images are treated as preloaded when available.
+- Answer points are held out of the cumulative leaderboard until the question is revealed.
+- Round score finalization is idempotent and protected against concurrent double-awards.
+- Final leaderboard button spacing is corrected.

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-server";
+import { QUESTION_START_BUFFER_SECONDS } from "@/lib/game";
 import { STAGES, RoundKey } from "@/lib/rounds";
 
 export async function POST(req: Request, { params }: { params: Promise<{ code: string }> }) {
@@ -16,10 +17,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
   }
 
   const questionIndex = game.current_round % 10;
+
+  // Finalize the revealed question before moving on. This is idempotent, so
+  // it is also safe if the host already finalized it when the reveal appeared.
+  const { error: finalizeError } = await db.rpc("finalize_round_scores", {
+    p_game_id: game.id,
+    p_round: game.current_round,
+  });
+  if (finalizeError) return NextResponse.json({ error: finalizeError.message }, { status: 500 });
+
   if (questionIndex < 9) {
     const { error: updateError } = await db.from("games").update({
       current_round: game.current_round + 1,
-      question_started_at: new Date().toISOString(),
+      question_started_at: new Date(Date.now() + QUESTION_START_BUFFER_SECONDS * 1000).toISOString(),
     }).eq("id", game.id);
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
     return NextResponse.json({ ok: true, action: "next_question" });
