@@ -109,6 +109,7 @@ export default function GamePage() {
   if (err && !game) return <main className="tb-shell"><div className="tb-wrap"><div className="tb-card tb-center">{err}</div></div></main>;
 
   const stage = game?.stage || "throwback";
+  const currentRound = game?.current_round ?? 0;
   const def = ROUND_DEFINITIONS[stage];
   const isQuestion = game?.status === "question" && game.stage_status === "question";
   const isLobby = game?.status === "lobby" || game?.stage_status === "not_started";
@@ -125,13 +126,13 @@ export default function GamePage() {
             {content.type === "throwback" ? <>
               <div className="tb-image-frame">{!imageReady && <div className="tb-image-loading"><div className="tb-spinner"/><span>Loading image…</span></div>}<img src={content.image} alt={content.description} className={imageReady ? "tb-event-image ready" : "tb-event-image"} onLoad={() => setImageReady(true)} /></div>
               <div className="tb-qbody">
-                <div className="tb-round"><span>THROWBACK · {game.current_round + 1} / 10</span><span className="tb-timer">{imageReady ? `${seconds}s` : "READYING"}</span></div>
+                <div className="tb-round"><span>THROWBACK · {currentRound + 1} / 10</span><span className="tb-timer">{imageReady ? `${seconds}s` : "READYING"}</span></div>
                 {showReveal ? <RevealBlock reveal={reveal!} myAnswer={myAnswer} /> : answered || expired ? <div className="tb-locked">{expired ? "TIME'S UP · WAITING FOR REVEAL" : "ANSWER LOCKED"}</div> : <><div className="tb-year">{guess}</div><p className="tb-hint">Place the year on the timeline.</p><div className="tb-slider-wrap"><input className="tb-slider" type="range" min="1800" max="2026" value={guess} disabled={!isQuestion || submitting} onChange={e => setGuess(Number(e.target.value))}/><div className="tb-scale">{YEARS.map(y => <span key={y} style={{left:`${yearPosition(y)}%`}}>{y}</span>)}</div></div><button className="tb-btn primary tb-submit" disabled={submitting || !isQuestion || seconds === 0} onClick={() => submitAnswer(guess)}>{submitting ? "LOCKING IN…" : `LOCK IN ${guess}`}</button></>}
                 {err && <div className="tb-error">{err}</div>}
               </div>
             </> : <div className="quiz-body">
-              <div className="tb-round"><span>{def.name} · {game.current_round % 10 + 1} / 10</span><span className="tb-timer">{seconds}s</span></div>
-              <div className="quiz-question-number">QUESTION {game.current_round % 10 + 1}</div>
+              <div className="tb-round"><span>{def.name} · {currentRound % 10 + 1} / 10</span><span className="tb-timer">{seconds}s</span></div>
+              <div className="quiz-question-number">QUESTION {currentRound % 10 + 1}</div>
               <h1 className="quiz-question">{content.question}</h1>
               <div className="quiz-options">{content.options.map((option, index) => <button key={option} className={`quiz-option ${selected === index ? "selected" : ""} ${answered ? "answered" : ""}`} disabled={!isQuestion || answered || submitting || seconds === 0} onClick={() => submitAnswer(index)}><span>{String.fromCharCode(65 + index)}</span>{option}</button>)}</div>
               {showReveal ? <RevealBlock reveal={reveal!} myAnswer={myAnswer} selected={selected}/>: answered || expired ? <div className="tb-locked">{expired ? "TIME'S UP · ANSWER REVEALING…" : "ANSWER LOCKED · WAIT FOR REVEAL"}</div> : <p className="tb-note quiz-hint">Choose one answer. Faster correct answers score more points.</p>}
